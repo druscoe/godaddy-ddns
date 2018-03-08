@@ -38,12 +38,11 @@ version='0.2'
 author='Carl Edman (CarlEdman@gmail.com)'
 
 import sys, json, argparse
+import requests
 
 if sys.version_info > (3,):
-  from urllib.request import urlopen, Request
   from urllib.error import URLError, HTTPError
 else:
-  from urllib2 import urlopen, Request
   from urllib2 import URLError, HTTPError
 
 parser = argparse.ArgumentParser(description='Update GoDaddy DNS "A" Record.', fromfile_prefix_chars='%', epilog= \
@@ -81,10 +80,9 @@ def main():
   
   if not args.ip:
     try:
-      with urlopen("http://ipv4.icanhazip.com/") as f: resp=f.read()
-      if sys.version_info > (3,): resp = resp.decode('utf-8')
+      resp = requests.get("http://ipv4.icanhazip.com/").content
       args.ip = resp.strip()
-    except URLError:
+    except requests.exceptions.ConnectionError:
       msg = 'Unable to automatically obtain IP address from http://ipv4.icanhazip.com/.'
       raise Exception(msg)
   
@@ -98,18 +96,18 @@ def main():
   url = 'https://api.godaddy.com/v1/domains/{}/records/A/{}'.format('.'.join(hostnames[1:]),hostnames[0])
   data = json.dumps([ { "data": args.ip, "ttl": args.ttl, "name": hostnames[0], "type": "A" } ])
   if sys.version_info > (3,):  data = data.encode('utf-8')
-  req = Request(url, method='PUT', data=data)
 
-  req.add_header("Content-Type","application/json")
-  req.add_header("Accept","application/json")
+  headers = {
+    "Content-Type":   "application/json",
+    "Accept":         "application/json",
+  }
   if args.key and args.secret:
-    req.add_header("Authorization", "sso-key {}:{}".format(args.key,args.secret))
+    headers["Authorization"] = "sso-key {}:{}".format(args.key,args.secret)
   
   try:
-    with urlopen(req) as f: resp = f.read()
-    if sys.version_info > (3,):  resp = resp.decode('utf-8')
-    resp = json.loads(resp)
-  except HTTPError(e):
+    resp = requests.put(url, data=data, headers=headers)
+    resp = json.loads(resp.content)
+  except requests.exceptions.ConnectionError as e:
     if e.code==400:
       msg = 'Unable to set IP address: GoDaddy API URL ({}) was malformed.'.format(req.full_url)
     elif e.code==401:
@@ -131,8 +129,8 @@ Correct values can be obtained from from https://developer.godaddy.com/keys/ and
     else:
       msg = 'Unable to set IP address: GoDaddy API failure because "{}".'.format(e.reason)
     raise Exception(msg)
-  except URLError(e):
-    msg = 'Unable to set IP address: GoDaddy API failure because "{}".'.format(e.reason)
+  except requests.exceptions.ConnectionError as e:
+    msg = 'Unable to set IP address: GoDaddy API failure because "{}".'.format(e)
     raise Exception(msg)
   
   print('IP address for {} set to {}.'.format(args.hostname,args.ip))
